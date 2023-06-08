@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 set(PICO_SDK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/pico-sdk)
+set(PICO_BOARD "pico")
 
 # Pull in SDK (must be before project)
 include(pico_sdk_import.cmake)
@@ -26,6 +27,10 @@ add_executable(app
 
 # pull in common dependencies
 target_link_libraries(app pico_stdlib)
+
+# enable usb output, disable uart output
+pico_enable_stdio_usb(app 1)
+pico_enable_stdio_uart(app 0)
 
 # create map/bin/hex file etc.
 pico_add_extra_outputs(app)
