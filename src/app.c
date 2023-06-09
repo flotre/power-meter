@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 
+#include "modbus.h"
+
 #define VERSION 0x0001
 
 /* configuration
@@ -22,6 +24,7 @@ GP11 => dimmer output
 GP25 => led
 
 */
+
 #define UART0_TX_PIN 0
 #define UART0_RX_PIN 1
 
@@ -41,39 +44,51 @@ void hardware_init()
     gpio_set_dir(LED_PIN, GPIO_OUT);
 
 
-    // Set up our UART1
-    uart_init(uart1, 3800);
-    gpio_set_function(UART1_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART1_RX_PIN, GPIO_FUNC_UART);
+    // Set up UART0
+    gpio_set_function(UART0_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART0_RX_PIN, GPIO_FUNC_UART);
+    uart_init(uart0, 115200);
+    uart_set_hw_flow(uart0, false, false);
+    uart_set_fifo_enabled (uart0, true);
     
-    // Set up our UART1
-    uart_init(uart1, 3800);
+    // Set up UART1
     gpio_set_function(UART1_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART1_RX_PIN, GPIO_FUNC_UART);
+    uart_init(uart1, 3800);
+    uart_set_hw_flow(uart1, false, false);
+    uart_set_fifo_enabled (uart1, true);
+    
 }
 
 void blink_led(void) {
     static bool b_led_state = false;
     static absolute_time_t blink_time = 0;
+    int64_t blink_period_us = 500*1000; // 500ms
 
     // blink LED
     absolute_time_t cur_time = get_absolute_time();
-    int64_t blink_diff_us = absolute_time_diff_us (blink_time, cur_time);
-    if( blink_diff_us > 500000 ) {
+    int64_t blink_diff_us = absolute_time_diff_us(blink_time, cur_time);
+    if( blink_diff_us > blink_period_us ) {
+        blink_time = cur_time;
         gpio_put(LED_PIN, b_led_state);
         b_led_state = !b_led_state;
-        blink_time = cur_time;
     }
 }
+
+
 
 int main() {
     stdio_init_all();
     printf("Routeur solaire v%d.%d (%s %s)\n", VERSION>>8, VERSION&0xFF, __DATE__, __TIME__);
+    
     hardware_init();
-
+    modbus_client_init();
+    modbus_server_init();
     
     while (true) {
         blink_led();
-        
+        modbus_server_loop();
+        modbus_client_loop();
+        // update_dimmer_output_loop
     }
 }
