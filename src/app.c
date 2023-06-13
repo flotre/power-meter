@@ -6,8 +6,10 @@
 
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "hardware/watchdog.h"
 
 #include "modbus.h"
+#include "data.h"
 
 #define VERSION 0x0001
 
@@ -83,12 +85,27 @@ int main() {
     
     hardware_init();
     modbus_client_init();
-    modbus_server_init();
     
     while (true) {
         blink_led();
-        modbus_server_loop();
         modbus_client_loop();
-        // update_dimmer_output_loop
+        data_loop();
+
+        // console
+        int val = getchar_timeout_us(0);
+        if( val != PICO_ERROR_TIMEOUT ) {
+            char c = (char)val;
+            switch(c) {
+                case 'r':
+                    printf("Enable watchdog\n");
+                    watchdog_enable(100,1);
+                    break;
+                case 's':
+                    data_toggle_simu();
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 }

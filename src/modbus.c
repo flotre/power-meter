@@ -22,6 +22,12 @@ CRC 	    2 	Cyclic redundancy check
 */
 
 /*****************************************************************************/
+/*            CONST                                                          */
+/*****************************************************************************/
+#define NB_REGISTER 128
+#define MODBUS_FRAME_SIZE 256
+#define NB_POWER_DATA 60
+/*****************************************************************************/
 /*            PRIVATE TYPE                                                   */
 /*****************************************************************************/
 
@@ -39,7 +45,7 @@ typedef struct
     enum mb_state state;
     uint8_t u8_function;
     absolute_time_t sof_time;
-    uint8_t mb_frame[256];
+    uint8_t mb_frame[MODBUS_FRAME_SIZE];
     uint8_t u8_frame_size;
     uint8_t u8_frame_expected_size;
     uart_inst_t *uart;
@@ -50,7 +56,9 @@ typedef struct
 /*****************************************************************************/
 /*            PRIVATE FUNCTION                                               */
 /*****************************************************************************/
-uint16_t crc16(uint8_t *buffer, uint16_t buffer_length);
+uint16_t modbus_crc16(uint8_t *buffer, uint16_t buffer_length);
+uint32_t bytes_to_uint32(uint8_t* pbuf);
+
 void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size);
 void modbus_server_rx_cb(uint8_t * pbuf, uint8_t size);
 void modbus_rx_loop(t_mb_ctx* ctx);
@@ -59,11 +67,28 @@ void modbus_rx_loop(t_mb_ctx* ctx);
 /*            PRIVATE VAR                                                    */
 /*****************************************************************************/
 static t_mb_ctx mb_ctx_client;
-static t_mb_ctx mb_ctx_server;
+static t_power_data power_data[NB_POWER_DATA];
+static uint32_t u32_power_data_idx = 0;
+
 
 /*****************************************************************************/
 /*            FUNCTION DEFINITION                                            */
 /*****************************************************************************/
+t_power_data* modbus_get_power_data(void) {
+    uint8_t u8_power_data_idx = (u32_power_data_idx-1) % NB_POWER_DATA;
+    
+    return &power_data[u8_power_data_idx];
+}
+
+
+void modbus_send_blocking(t_mb_ctx *ctx, uint8_t* buf, uint8_t size) {
+    uint16_t u16_crc = modbus_crc16(buf, size-2);
+    buf[size-2] = (uint8_t)(u16_crc >> 8);
+    buf[size-1] = (uint8_t)u16_crc;
+    uart_write_blocking (ctx->uart, buf, size);
+}
+
+
 void modbus_ctx_init(t_mb_ctx *ctx, uart_inst_t *uart, t_rx_cb rx_cb) {
     memset(ctx, 0, sizeof(ctx));
     ctx->state = MODBUS_WAIT_SOF;
@@ -72,13 +97,14 @@ void modbus_ctx_init(t_mb_ctx *ctx, uart_inst_t *uart, t_rx_cb rx_cb) {
 }
 
 void modbus_client_init(void) {
+    memset(&power_data, 0, sizeof(power_data));
     modbus_ctx_init(&mb_ctx_client, MODBUS_CLIENT_UART, modbus_client_rx_cb);
 }
 
 
 void modbus_client_loop(void) {
     static absolute_time_t send_time = 0;
-    const int64_t SEND_PERIOD_US = 1*1000*1000; // 1s
+    const int64_t SEND_PERIOD_US = 100*1000; // 100ms
     // read register 0x0048 -> 0x0048+0x000E
     const uint8_t request[] = {0x01, 0x03, 0x00, 0x48, 0x00, 0x0E, 0x44, 0x18};
 
@@ -97,9 +123,9 @@ void modbus_client_loop(void) {
 }
 
 void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size) {
-    
+    const uint16_t u16_register_base = 0x0048;
     // print frame
-    puts("RX ");
+    puts("CMB RX ");
     for(int i=0;i<size;i++) {
         printf("%02X ", pbuf[i]);
     }
@@ -107,28 +133,49 @@ void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size) {
 
     uint8_t u8_address = pbuf[0];
     uint8_t u8_function_code = pbuf[1];
-    switch(u8_function_code) {
-        case 3:
-            break;
+    // check if frame match the request we send, ignore other frame
+    if((u8_function_code == 3) && (size==5+4*0xE)) {
+        //uint8_t u8_data_size = pbuf[2];
+
+        // build data struct
+        uint8_t u8_power_data_idx = u32_power_data_idx % NB_POWER_DATA;
+        t_power_data* p_data = &power_data[u8_power_data_idx];
+        
+        //common value
+        p_data->u32_index = u32_power_data_idx++;
+        p_data->time = get_absolute_time();
+        p_data->tension_mv = bytes_to_uint32(&pbuf[3]) / 10;
+        p_data->frequence_mhz = bytes_to_uint32(&pbuf[31]) * 10;
+        // voie 1
+        p_data->voie[0].courant_ma = bytes_to_uint32(&pbuf[7]) / 10;
+        p_data->voie[0].puissance_active_mw = bytes_to_uint32(&pbuf[11]) / 10;
+        if( pbuf[27] ) {
+            p_data->voie[0].puissance_active_mw = -p_data->voie[0].puissance_active_mw;
+        }
+        p_data->voie[0].energie_wh = bytes_to_uint32(&pbuf[15]) / 10;
+        p_data->voie[0].facteur_puissance = bytes_to_uint32(&pbuf[19]);
+        // voie 2
+        p_data->voie[1].courant_ma = bytes_to_uint32(&pbuf[39]) / 10;
+        p_data->voie[1].puissance_active_mw = bytes_to_uint32(&pbuf[43]) / 10;
+        if( pbuf[28] ) {
+            p_data->voie[1].puissance_active_mw = -p_data->voie[1].puissance_active_mw;
+        }
+        p_data->voie[1].energie_wh = bytes_to_uint32(&pbuf[47]) / 10;
+        p_data->voie[1].facteur_puissance = bytes_to_uint32(&pbuf[51]);
     }
-
 }
 
-void modbus_server_init(void) {
-    modbus_ctx_init(&mb_ctx_server, MODBUS_SERVER_UART, modbus_server_rx_cb);
-}
-
-void modbus_server_loop(void) {
-    modbus_rx_loop(&mb_ctx_server);
-}
-
-void modbus_server_rx_cb(uint8_t * pbuf, uint8_t size) {
-}
 
 void modbus_rx_loop(t_mb_ctx* ctx) {
 
     while( uart_is_readable(ctx->uart) ) {
         uint8_t byte = (uint8_t) uart_get_hw(ctx->uart)->dr;
+        // check max size
+        if(ctx->u8_frame_size >= MODBUS_FRAME_SIZE) {
+            // frame too long, timeout will reset comm
+            break;
+        }
+
         ctx->mb_frame[ctx->u8_frame_size++] = byte;
 
         switch(ctx->state) {
@@ -141,7 +188,13 @@ void modbus_rx_loop(t_mb_ctx* ctx) {
             {
                 ctx->u8_function = byte;
                 ctx->state = MODBUS_WAIT_DATA;
-                ctx->u8_frame_expected_size = 7;
+                // check for error
+                if(byte&0x80) {
+                    // exception
+                    ctx->u8_frame_expected_size = 7;
+                } else {
+                    ctx->u8_frame_expected_size = 5;
+                }
                 break;
             }
 
@@ -157,8 +210,13 @@ void modbus_rx_loop(t_mb_ctx* ctx) {
             {
                 if( ctx->u8_frame_size >= ctx->u8_frame_expected_size ) {
                     // compute CRC16
-                    uint16_t crc = crc16(ctx->mb_frame, ctx->u8_frame_size-2);
+                    uint16_t crc = modbus_crc16(ctx->mb_frame, ctx->u8_frame_size-2);
                     if( (ctx->mb_frame[ctx->u8_frame_size-2] == (crc >> 8)) && (ctx->mb_frame[ctx->u8_frame_size-1] == (crc & 0x00ff)) ) {
+                        if(ctx->u8_function&0x80) {
+                            // exception
+                            printf("MB RX Error code=%02X Exception code=%02X\n", ctx->mb_frame[1], ctx->mb_frame[2]);
+                        }
+                        // callback
                         ctx->rx_cb(ctx->mb_frame, ctx->u8_frame_size);
                     } else {
                         printf("modbus bad crc\n");
@@ -247,7 +305,7 @@ static const uint8_t table_crc_lo[] = {
 
 
 
-uint16_t crc16(uint8_t *buffer, uint16_t buffer_length)
+uint16_t modbus_crc16(uint8_t *buffer, uint16_t buffer_length)
 {
     uint8_t crc_hi = 0xFF; /* high CRC byte initialized */
     uint8_t crc_lo = 0xFF; /* low CRC byte initialized */
@@ -261,4 +319,8 @@ uint16_t crc16(uint8_t *buffer, uint16_t buffer_length)
     }
 
     return (crc_hi << 8 | crc_lo);
+}
+
+uint32_t bytes_to_uint32(uint8_t* pbuf) {
+    return (((uint32_t)pbuf[0])<<24) + (((uint32_t)pbuf[1])<<16)  + (((uint32_t)pbuf[2])<<8) + pbuf[3];
 }

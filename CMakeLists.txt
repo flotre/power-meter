@@ -24,6 +24,7 @@ pico_sdk_init()
 add_executable(app
         src/app.c
         src/modbus.c
+        src/data.c
         )
 
 # pull in common dependencies
