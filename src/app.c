@@ -5,8 +5,12 @@
  */
 
 #include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
 #include "pico/stdlib.h"
+#include "hardware/rtc.h"
 #include "hardware/watchdog.h"
+#include "pico/util/datetime.h"
 
 #include "modbus.h"
 #include "data.h"
@@ -38,6 +42,9 @@ GP25 => led
 
 #define LED_PIN 25
 
+
+char cmd_buf[512];
+uint32_t u32_char_count = 0;
 
 void hardware_init()
 {
@@ -81,6 +88,22 @@ void blink_led(void) {
 
 int main() {
     stdio_init_all();
+
+    // default date
+    datetime_t t = {
+            .year  = 2023,
+            .month = 01,
+            .day   = 01,
+            .dotw  = 0, // 0 is Sunday, so 5 is Friday
+            .hour  = 00,
+            .min   = 00,
+            .sec   = 00
+    };
+ 
+    // Start the RTC
+    rtc_init();
+    rtc_set_datetime(&t);
+    
     printf("Routeur solaire v%d.%d (%s %s)\n", VERSION>>8, VERSION&0xFF, __DATE__, __TIME__);
     
     hardware_init();
@@ -95,16 +118,81 @@ int main() {
         int val = getchar_timeout_us(0);
         if( val != PICO_ERROR_TIMEOUT ) {
             char c = (char)val;
-            switch(c) {
-                case 'r':
+            if (c == '\r' ) {
+                char* p_cmd = cmd_buf;
+                // execute command
+                cmd_buf[u32_char_count] = '\0';
+                // get command
+                char * p_first_space = strchr(cmd_buf, ' ');
+                if(p_first_space != NULL) {
+                    *p_first_space = '\0';
+                }
+                if( 0 == strcmp("reset", cmd_buf)) {
                     printf("Enable watchdog\n");
                     watchdog_enable(100,1);
-                    break;
-                case 's':
+                } else if( 0 == strcmp("simu", cmd_buf)) {
                     data_toggle_simu();
-                    break;
-                default:
-                    break;
+                } else if( 0 == strcmp("datetime", cmd_buf)) {
+                    // no argument print datetime
+                    if(NULL == p_first_space) {
+                        datetime_t t;
+                        char datetime_buf[256];
+                        rtc_get_datetime(&t);
+                        datetime_to_str(datetime_buf, sizeof(datetime_buf), &t);
+                        printf("%s\n", datetime_buf);
+                    } else {
+                        // first argument is datetime in format YYYY-MM-DD-HH-MM-SS-dotw
+                        char* p_datetime = p_first_space+1;
+                        // trim end space
+                        char * p_end_space = strchr(p_datetime, ' ');
+                        if(p_end_space != NULL) {
+                            *p_end_space = '\0';
+                        }
+                        // parse datetime
+                        // newlib-nano doesn't support %hhd so use intermediate int
+                        datetime_t t;
+                        int val[7];
+                        int nb_found = sscanf(p_datetime, "%d-%d-%d-%d-%d-%d-%d", &val[0], &val[1], &val[2], &val[3], &val[4], &val[5], &val[6]);
+                        if( 7 == nb_found ) {
+                            t.year=val[0];
+                            t.month=val[1];
+                            t.day=val[2];
+                            t.hour=val[3];
+                            t.min=val[4];
+                            t.sec=val[5];
+                            t.dotw=val[6];
+                            // Set time
+                            rtc_set_datetime(&t);
+                            // clk_sys is >2000x faster than clk_rtc, so datetime is not updated immediately when rtc_get_datetime() is called.
+                            // tbe delay is up to 3 RTC clock cycles (which is 64us with the default clock settings)
+                            sleep_us(64);
+                            // get and print new time
+                            datetime_t newt;
+                            char datetime_buf[256];
+                            rtc_get_datetime(&newt);
+                            datetime_to_str(datetime_buf, sizeof(datetime_buf), &newt);
+                            printf("datetime set to %s\n", datetime_buf);
+                        } else {
+                            printf("Invalid format [%s] nb_found=%d\n", p_datetime, nb_found);
+                            printf("%d-%d-%d-%d-%d-%d-%d\n", t.year, t.month, t.day, t.hour, t.min, t.sec, t.dotw);
+                        }
+                    }
+
+
+                } else {
+                    printf("Unknown command [%s]\n", cmd_buf);
+                }
+                // reset command
+                u32_char_count = 0;
+            } else {
+                // add char to command
+                cmd_buf[u32_char_count] = c;
+                u32_char_count++;
+                if( u32_char_count >= (sizeof(cmd_buf)-1) ) {
+                    // command too long
+                    printf("Command too long\n");
+                    u32_char_count = 0;
+                }
             }
         }
     }

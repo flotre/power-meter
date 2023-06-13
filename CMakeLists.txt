@@ -28,7 +28,7 @@ add_executable(app
         )
 
 # pull in common dependencies
-target_link_libraries(app pico_stdlib)
+target_link_libraries(app pico_stdlib hardware_rtc)
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(app 1)
