@@ -24,7 +24,6 @@ CRC 	    2 	Cyclic redundancy check
 /*****************************************************************************/
 /*            CONST                                                          */
 /*****************************************************************************/
-#define NB_REGISTER 128
 #define MODBUS_FRAME_SIZE 256
 #define NB_POWER_DATA 60
 /*****************************************************************************/
@@ -34,6 +33,7 @@ CRC 	    2 	Cyclic redundancy check
 enum mb_state {
     MODBUS_WAIT_SOF=0,
     MODBUS_WAIT_FUNCTION,
+    MODBUS_WAIT_DATA_SIZE,
     MODBUS_WAIT_DATA,
     MODBUS_WAIT_CRC
 };
@@ -60,7 +60,6 @@ uint16_t modbus_crc16(uint8_t *buffer, uint16_t buffer_length);
 uint32_t bytes_to_uint32(uint8_t* pbuf);
 
 void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size);
-void modbus_server_rx_cb(uint8_t * pbuf, uint8_t size);
 void modbus_rx_loop(t_mb_ctx* ctx);
 
 /*****************************************************************************/
@@ -69,11 +68,20 @@ void modbus_rx_loop(t_mb_ctx* ctx);
 static t_mb_ctx mb_ctx_client;
 static t_power_data power_data[NB_POWER_DATA];
 static uint32_t u32_power_data_idx = 0;
-
+static absolute_time_t send_time = 0;
 
 /*****************************************************************************/
 /*            FUNCTION DEFINITION                                            */
 /*****************************************************************************/
+void modbus_print_frame(uint8_t* p_frame, uint8_t u8_size) {
+    // print frame
+    for(int i=0;i<u8_size;i++) {
+        printf("%02X ", p_frame[i]);
+    }
+    printf("\n");
+}
+
+
 t_power_data* modbus_get_power_data(void) {
     uint8_t u8_power_data_idx = (u32_power_data_idx-1) % NB_POWER_DATA;
     
@@ -99,12 +107,16 @@ void modbus_ctx_init(t_mb_ctx *ctx, uart_inst_t *uart, t_rx_cb rx_cb) {
 void modbus_client_init(void) {
     memset(&power_data, 0, sizeof(power_data));
     modbus_ctx_init(&mb_ctx_client, MODBUS_CLIENT_UART, modbus_client_rx_cb);
+
+    // read sensor properties
+    uint8_t request[] = {0x01, 0x03, 0x00, 0x00, 0x00, 0x04, 0, 0};
+    modbus_send_blocking(&mb_ctx_client, request, sizeof(request));
+    send_time = get_absolute_time();
 }
 
 
 void modbus_client_loop(void) {
-    static absolute_time_t send_time = 0;
-    const int64_t SEND_PERIOD_US = 100*1000; // 100ms
+    const int64_t SEND_PERIOD_US = 1000*1000; // 1000ms
     // read register 0x0048 -> 0x0048+0x000E
     const uint8_t request[] = {0x01, 0x03, 0x00, 0x48, 0x00, 0x0E, 0x44, 0x18};
 
@@ -123,14 +135,9 @@ void modbus_client_loop(void) {
 }
 
 void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size) {
-    const uint16_t u16_register_base = 0x0048;
     // print frame
-    puts("CMB RX ");
-    for(int i=0;i<size;i++) {
-        printf("%02X ", pbuf[i]);
-    }
-    puts("\n");
-
+    printf("CMB RX ");
+    modbus_print_frame(pbuf, size);
     uint8_t u8_address = pbuf[0];
     uint8_t u8_function_code = pbuf[1];
     // check if frame match the request we send, ignore other frame
@@ -187,16 +194,24 @@ void modbus_rx_loop(t_mb_ctx* ctx) {
             case MODBUS_WAIT_FUNCTION:
             {
                 ctx->u8_function = byte;
-                ctx->state = MODBUS_WAIT_DATA;
+                ctx->state = MODBUS_WAIT_DATA_SIZE;
                 // check for error
                 if(byte&0x80) {
                     // exception
                     ctx->u8_frame_expected_size = 7;
                 } else {
-                    ctx->u8_frame_expected_size = 5;
+                    // we need to read one more byte
+                    ctx->u8_frame_expected_size = 3;
                 }
                 break;
             }
+
+            case MODBUS_WAIT_DATA_SIZE:
+                // TODO adjust expected size if fc > 10
+                // header(3) + crc(2)
+                ctx->u8_frame_expected_size = byte + 5;
+                ctx->state = MODBUS_WAIT_DATA;
+                break;
 
             case MODBUS_WAIT_DATA:
                 // TODO adjust expected size if fc > 10
@@ -219,7 +234,8 @@ void modbus_rx_loop(t_mb_ctx* ctx) {
                         // callback
                         ctx->rx_cb(ctx->mb_frame, ctx->u8_frame_size);
                     } else {
-                        printf("modbus bad crc\n");
+                        printf("modbus bad crc %04X\n", crc);
+                        modbus_print_frame(ctx->mb_frame, ctx->u8_frame_size);
                         return;
                     }
                     ctx->state = MODBUS_WAIT_SOF;

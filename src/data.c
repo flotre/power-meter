@@ -17,6 +17,7 @@ void data_loop(void) {
     int64_t diff_us = absolute_time_diff_us(p_power_data->time, cur_time);
     // if data has less than one second
     if( ((diff_us < (1*1000*1000)) && (u32_LastSendIndex != p_power_data->u32_index)) || (b_simu) ) {
+        u32_LastSendIndex = p_power_data->u32_index;
         // send data on stdout
         datetime_t t;
         char datetime_buf[256];
@@ -24,7 +25,7 @@ void data_loop(void) {
         // format to iso 8601 YYYY-MM-DDTHH:MM:SS
         snprintf(datetime_buf, sizeof(datetime_buf), "%d-%02d-%02dT%02d:%02d:%02d", t.year, t.month, t.day, t.hour, t.min, t.sec);
         // use json format
-        puts("{");
+        printf("{");
         printf("\"idx\":%u,", p_power_data->u32_index);
         printf("\"time\":\"%s\",", datetime_buf); //p_power_data->time);
         printf("\"V\":%u.%03u,", p_power_data->tension_mv/1000, p_power_data->tension_mv%1000);
@@ -35,7 +36,7 @@ void data_loop(void) {
             printf(",\"E%d\":%u", i+1, p_power_data->voie[i].energie_wh);
             printf(",\"fp%d\":%u.%03u", i+1, p_power_data->voie[i].facteur_puissance/1000, p_power_data->voie[i].facteur_puissance%1000);
         }
-        puts("}\n");
+        printf("}\n");
     }
 }
 

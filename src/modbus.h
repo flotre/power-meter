@@ -3,8 +3,7 @@
 #include "pico/stdlib.h"
 
 
-#define MODBUS_SERVER_UART uart0
-#define MODBUS_CLIENT_UART uart1
+#define MODBUS_CLIENT_UART uart0
 
 
 typedef struct

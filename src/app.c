@@ -56,16 +56,9 @@ void hardware_init()
     // Set up UART0
     gpio_set_function(UART0_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART0_RX_PIN, GPIO_FUNC_UART);
-    uart_init(uart0, 115200);
+    uart_init(uart0, 4800);
     uart_set_hw_flow(uart0, false, false);
     uart_set_fifo_enabled (uart0, true);
-    
-    // Set up UART1
-    gpio_set_function(UART1_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART1_RX_PIN, GPIO_FUNC_UART);
-    uart_init(uart1, 3800);
-    uart_set_hw_flow(uart1, false, false);
-    uart_set_fifo_enabled (uart1, true);
     
 }
 
@@ -103,6 +96,11 @@ int main() {
     // Start the RTC
     rtc_init();
     rtc_set_datetime(&t);
+
+    // wait for uart connection
+    while (!stdio_usb_connected()) {
+        sleep_ms(100);
+    }
     
     printf("Routeur solaire v%d.%d (%s %s)\n", VERSION>>8, VERSION&0xFF, __DATE__, __TIME__);
     
