@@ -25,10 +25,13 @@ add_executable(app
         src/app.c
         src/modbus.c
         src/data.c
+        src/ssd1306_i2c/ssd1306_i2c.c
         )
 
+target_include_directories(app PRIVATE src src/ssd1306_i2c)
+
 # pull in common dependencies
-target_link_libraries(app pico_stdlib hardware_rtc)
+target_link_libraries(app pico_stdlib hardware_rtc hardware_i2c)
 
 # enable usb output, disable uart output
 pico_enable_stdio_usb(app 1)

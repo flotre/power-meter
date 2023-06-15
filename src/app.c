@@ -10,23 +10,20 @@
 #include "pico/stdlib.h"
 #include "hardware/rtc.h"
 #include "hardware/watchdog.h"
+#include "hardware/i2c.h"
 #include "pico/util/datetime.h"
 
 #include "modbus.h"
 #include "data.h"
+#include "ssd1306_i2c.h"
 
 #define VERSION 0x0001
 
 /* configuration
 
-UART0 (GP0, GP1) => modbus server RTU
+UART0 (GP0, GP1) => modbus client RTU
 USB CDC => console
-UART1 (GP4, GP5) => modbus client RTU
 I2C1 (GP14, GP15) => oled display
-
-GP10 => zero crossing input
-GP11 => dimmer output
-
 GP25 => led
 
 */
@@ -34,11 +31,13 @@ GP25 => led
 #define UART0_TX_PIN 0
 #define UART0_RX_PIN 1
 
-#define UART1_TX_PIN 4
-#define UART1_RX_PIN 5
 
 #define I2C1_SDA_PIN 14
 #define I2C1_SCL_PIN 15
+// 400 is usual, but often these can be overclocked to improve display response.
+// Tested at 1000 on both 32 and 84 pixel height devices and it worked.
+#define SSD1306_I2C_CLK             400
+//#define SSD1306_I2C_CLK             1000
 
 #define LED_PIN 25
 
@@ -59,6 +58,15 @@ void hardware_init()
     uart_init(uart0, 4800);
     uart_set_hw_flow(uart0, false, false);
     uart_set_fifo_enabled (uart0, true);
+
+    // set up I2C
+    // I2C is "open drain", pull ups to keep signal high when no data is being
+    // sent
+    i2c_init(i2c1, SSD1306_I2C_CLK * 1000);
+    gpio_set_function(I2C1_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(I2C1_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C1_SDA_PIN);
+    gpio_pull_up(I2C1_SCL_PIN);
     
 }
 
@@ -105,12 +113,14 @@ int main() {
     printf("Routeur solaire v%d.%d (%s %s)\n", VERSION>>8, VERSION&0xFF, __DATE__, __TIME__);
     
     hardware_init();
+    SSD1306_init();
     modbus_client_init();
     
     while (true) {
         blink_led();
         modbus_client_loop();
         data_loop();
+        SSD1306_loop();
 
         // console
         int val = getchar_timeout_us(0);
