@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/rtc.h"
 #include "pico/util/datetime.h"
@@ -32,7 +33,7 @@ void data_loop(void) {
         printf("\"F\":%u.%03u", p_power_data->frequence_mhz/1000, p_power_data->frequence_mhz%1000);
         for(int8_t i=0; i<2; i++) {
             printf(",\"I%d\":%u.%03u", i+1, p_power_data->voie[i].courant_ma/1000, p_power_data->voie[i].courant_ma%1000);
-            printf(",\"P%d\":%u.%03u", i+1, p_power_data->voie[i].puissance_active_mw/1000, p_power_data->voie[i].puissance_active_mw%1000);
+            printf(",\"P%d\":%d.%03u", i+1, p_power_data->voie[i].puissance_active_mw/1000, abs(p_power_data->voie[i].puissance_active_mw)%1000);
             printf(",\"E%d\":%u", i+1, p_power_data->voie[i].energie_wh);
             printf(",\"fp%d\":%u.%03u", i+1, p_power_data->voie[i].facteur_puissance/1000, p_power_data->voie[i].facteur_puissance%1000);
         }
