@@ -62,11 +62,11 @@ void hardware_init()
     // set up I2C
     // I2C is "open drain", pull ups to keep signal high when no data is being
     // sent
-    i2c_init(i2c1, SSD1306_I2C_CLK * 1000);
     gpio_set_function(I2C1_SDA_PIN, GPIO_FUNC_I2C);
     gpio_set_function(I2C1_SCL_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(I2C1_SDA_PIN);
     gpio_pull_up(I2C1_SCL_PIN);
+    i2c_init(i2c1, SSD1306_I2C_CLK * 1000);
     
 }
 

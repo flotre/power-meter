@@ -50,6 +50,7 @@
 #define SSD1306_I2C_CLK             400
 //#define SSD1306_I2C_CLK             1000
 
+#define SSD1306_I2C_DEV             i2c1
 
 // commands (see datasheet)
 #define SSD1306_SET_MEM_MODE        _u(0x20)
@@ -124,7 +125,7 @@ void SSD1306_send_cmd(uint8_t cmd) {
     // this "data" can be a command or data to follow up a command
     // Co = 1, D/C = 0 => the driver expects a command
     uint8_t buf[2] = {0x80, cmd};
-    i2c_write_blocking(i2c_default, SSD1306_I2C_ADDR, buf, 2, false);
+    i2c_write_blocking(SSD1306_I2C_DEV, SSD1306_I2C_ADDR, buf, 2, false);
 }
 
 void SSD1306_send_cmd_list(uint8_t *buf, int num) {
@@ -145,7 +146,7 @@ void SSD1306_send_buf(uint8_t buf[], int buflen) {
     temp_buf[0] = 0x40;
     memcpy(temp_buf+1, buf, buflen);
 
-    i2c_write_blocking(i2c_default, SSD1306_I2C_ADDR, temp_buf, buflen + 1, false);
+    i2c_write_blocking(SSD1306_I2C_DEV, SSD1306_I2C_ADDR, temp_buf, buflen + 1, false);
 
     free(temp_buf);
 }
@@ -235,32 +236,14 @@ static void DrawLine(uint8_t *buf, int x0, int y0, int x1, int y1, bool on) {
 }
 
 static inline int GetFontIndex(uint8_t ch) {
-    if (ch >= 'A' && ch <='Z') {
-        return  ch - 'A' + 1;
-    }
-    else if (ch >= '0' && ch <='9') {
-        return  ch - '0' + 27;
+    if (ch < sizeof(font)) {
+        return  ch - 32;
     }
     else return  0; // Not got that char so space.
 }
 
-static uint8_t reversed[sizeof(font)] = {0};
-
-static uint8_t reverse(uint8_t b) {
-   b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-   return b;
-}
-static void FillReversedCache() {
-    // calculate and cache a reversed version of fhe font, because I defined it upside down...doh!
-    for (int i=0;i<sizeof(font);i++)
-        reversed[i] = reverse(font[i]);
-}
 
 static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
-    if (reversed[0] == 0) 
-        FillReversedCache();
 
     if (x > SSD1306_WIDTH - 8 || y > SSD1306_HEIGHT - 8)
         return;
@@ -268,12 +251,11 @@ static void WriteChar(uint8_t *buf, int16_t x, int16_t y, uint8_t ch) {
     // For the moment, only write on Y row boundaries (every 8 vertical pixels)
     y = y/8;
 
-    ch = toupper(ch);
     int idx = GetFontIndex(ch);
     int fb_idx = y * 128 + x;
 
     for (int i=0;i<8;i++) {
-        buf[fb_idx++] = reversed[idx * 8 + i];
+        buf[fb_idx++] = font[idx * 8 + i];
     }
 }
 
@@ -293,6 +275,8 @@ void SSD1306_init(void) {
     // process defaults to some of these but they are shown here
     // to demonstrate what the initialization sequence looks like
     // Some configuration values are recommended by the board manufacturer
+
+    printf("SSD1306_init...\n");
 
     uint8_t cmds[] = {
         SSD1306_SET_DISP,               // set display off
@@ -348,9 +332,9 @@ void SSD1306_init(void) {
     printf("flash the screen 3 times\n");
     for (int i = 0; i < 3; i++) {
         SSD1306_send_cmd(SSD1306_SET_ALL_ON);    // Set all pixels on
-        sleep_ms(500);
+        sleep_ms(250);
         SSD1306_send_cmd(SSD1306_SET_ENTIRE_ON); // go back to following RAM for pixel state
-        sleep_ms(500);
+        sleep_ms(250);
     }
 
     // render 3 cute little raspberries
@@ -371,26 +355,13 @@ void SSD1306_init(void) {
         area.start_col += offset;
         area.end_col += offset;
     }
-    printf("Scrolling on\n");
+    /*printf("Scrolling on\n");
     SSD1306_scroll(true);
     sleep_ms(5000);
     SSD1306_scroll(false);
-    printf("Scrolling off\n");
+    printf("Scrolling off\n");*/
 }
 
-/*
-printf("\"idx\":%u,", p_power_data->u32_index);
-printf("\"time\":\"%s\",", datetime_buf); //p_power_data->time);
-printf("\"V\":%u.%03u,", p_power_data->tension_mv/1000, p_power_data->tension_mv%1000);
-printf("\"F\":%u.%03u", p_power_data->frequence_mhz/1000, p_power_data->frequence_mhz%1000);
-for(int8_t i=0; i<2; i++) {
-    printf(",\"I%d\":%u.%03u", i+1, p_power_data->voie[i].courant_ma/1000, p_power_data->voie[i].courant_ma%1000);
-    printf(",\"P%d\":%u.%03u", i+1, p_power_data->voie[i].puissance_active_mw/1000, p_power_data->voie[i].puissance_active_mw%1000);
-    printf(",\"E%d\":%u", i+1, p_power_data->voie[i].energie_wh);
-    printf(",\"fp%d\":%u.%03u", i+1, p_power_data->voie[i].facteur_puissance/1000, p_power_data->voie[i].facteur_puissance%1000);
-}
-YYYY-MM-DDTHH:MM:SS
-*/
 // screen buffer
 // a char is 8x8 pixels so screen is 8 lines and a line is 16 char
 /*static char lines[SSD1306_HEIGHT/8][SSD1306_WIDTH/8] = {
@@ -403,6 +374,8 @@ YYYY-MM-DDTHH:MM:SS
     "99.999A  -99999W",
     "999999Wh   0.000",
 };*/
+
+char line[SSD1306_WIDTH/8+1];
 
 void SSD1306_loop(void) {
 
@@ -419,25 +392,40 @@ void SSD1306_loop(void) {
         // update buf content
         datetime_t t;
         rtc_get_datetime(&t);
-        // line 1 : YYMMDD  HH:MM:SS
-        sprintf(&buf[0], "%02u%02u%02u  %02u:%02u:%02u", t.year-2000, t.month, t.day, t.hour, t.min, t.sec);
-        // line 2 : "230.0V   50.0 Hz"
-        sprintf(&buf[SSD1306_WIDTH/8], "%3u.%uV   %2u.%02uHz", p_power_data->tension_mv/1000, (p_power_data->tension_mv%1000)/100,
-                                    p_power_data->frequence_mhz/1000, (p_power_data->frequence_mhz%1000)/100);
+        // line 1 : DD/MM/YYYY
+        sprintf(line, "%02u/%02u/%04u", t.day, t.month, t.year);
+        WriteString(buf, 0, 0, line);
+        
+        // line 2 : HH:MM:SS
+        sprintf(line, "%02u:%02u:%02u",t.hour, t.min, t.sec);
+        WriteString(buf, 0, SSD1306_PAGE_HEIGHT, line);
+        
         // line 3 empty
-        // line 4 : "99.999A  -99999W"
-        sprintf(&buf[3*SSD1306_WIDTH/8], "%2u.%03uA  % 5dW", p_power_data->voie[0].courant_ma/1000, p_power_data->voie[0].courant_ma%1000,
+        
+        // line 4 : "230.0V   50.0 Hz"
+        sprintf(line, "%3u.%uV   %2u.%02uHz", p_power_data->tension_mv/1000, (p_power_data->tension_mv%1000)/100,
+                                    p_power_data->frequence_mhz/1000, (p_power_data->frequence_mhz%1000)/100);
+        WriteString(buf, 0, 3*SSD1306_PAGE_HEIGHT, line);
+        
+        // line 5 : "99.999A  -99999W"
+        sprintf(line, "%2u.%03uA  %6dW", p_power_data->voie[0].courant_ma/1000, p_power_data->voie[0].courant_ma%1000,
                                     p_power_data->voie[0].puissance_active_mw/1000);
-        // line 5 : "999999Wh   0.000"
-        sprintf(&buf[4*SSD1306_WIDTH/8], "%6uWh   %u.%03u", p_power_data->voie[0].energie_wh,
+        WriteString(buf, 0, 4*SSD1306_PAGE_HEIGHT, line);
+        
+        // line 6 : "999999Wh   0.000"
+        sprintf(line, "%6uWh   %u.%03u", p_power_data->voie[0].energie_wh,
                                     p_power_data->voie[0].facteur_puissance/1000, p_power_data->voie[0].facteur_puissance%1000);
-        // line 6 empty
+        
+        WriteString(buf, 0, 5*SSD1306_PAGE_HEIGHT, line);
         // line 7 : "99.999A  -99999W"
-        sprintf(&buf[6*SSD1306_WIDTH/8], "%2u.%03uA  % 5dW", p_power_data->voie[1].courant_ma/1000, p_power_data->voie[1].courant_ma%1000,
+        sprintf(line, "%2u.%03uA  %6dW", p_power_data->voie[1].courant_ma/1000, p_power_data->voie[1].courant_ma%1000,
                                     p_power_data->voie[1].puissance_active_mw/1000);
+        WriteString(buf, 0, 6*SSD1306_PAGE_HEIGHT, line);
+        
         // line 8 : "999999Wh   0.000"
-        sprintf(&buf[7*SSD1306_WIDTH/8], "%6uWh   %u.%03u", p_power_data->voie[1].energie_wh,
+        sprintf(line, "%6uWh   %u.%03u", p_power_data->voie[1].energie_wh,
                                     p_power_data->voie[1].facteur_puissance/1000, p_power_data->voie[1].facteur_puissance%1000);
+        WriteString(buf, 0, 7*SSD1306_PAGE_HEIGHT, line);
         
         // update screen
         render(buf, &frame_area);
