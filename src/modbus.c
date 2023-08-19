@@ -136,7 +136,7 @@ void modbus_client_loop(void) {
 
 void modbus_client_rx_cb(uint8_t * pbuf, uint8_t size) {
     // print frame
-    printf("CMB RX ");
+    //printf("CMB RX ");
     modbus_print_frame(pbuf, size);
     uint8_t u8_address = pbuf[0];
     uint8_t u8_function_code = pbuf[1];

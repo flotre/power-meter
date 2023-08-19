@@ -106,8 +106,10 @@ int main() {
     rtc_set_datetime(&t);
 
     // wait for uart connection
-    while (!stdio_usb_connected()) {
+    int16_t i16Timeout = 5000;
+    while (!stdio_usb_connected() && (i16Timeout > 0)) {
         sleep_ms(100);
+        i16Timeout -= 100;
     }
     
     printf("Routeur solaire v%d.%d (%s %s)\n", VERSION>>8, VERSION&0xFF, __DATE__, __TIME__);
